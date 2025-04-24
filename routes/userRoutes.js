@@ -5,7 +5,12 @@ import {
     resendOtp,
     loginUser,
     getUserById,
-    updateUser
+    updateUser,
+    updateDoc,
+    deleteDocument,
+    getAllDoctors,
+    getDoctorDetails,
+    createAppointment,
 } from "../controllers/userController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import { uploadFields } from "../middleware/uploadMiddleware.js";
@@ -18,5 +23,11 @@ router.post("/resendOtp", resendOtp);
 router.post("/loginUser", loginUser);
 router.get("/getUserById", authMiddleware, getUserById);
 router.post("/updateUser",uploadFields, authMiddleware, updateUser);
+router.post("/updateDoc",uploadFields, authMiddleware, updateDoc);
+router.delete("/deleteDocument",uploadFields, authMiddleware, deleteDocument);
+router.get("/getAllDoctors", getAllDoctors);
+router.get("/getDoctorDetails", getDoctorDetails);
+router.post("/createAppointment", authMiddleware, createAppointment);
+
 
 export default router;

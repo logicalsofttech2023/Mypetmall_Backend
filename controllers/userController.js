@@ -2,6 +2,9 @@ import User from "../models/User.js";
 import generateToken from "../utils/generateToken.js";
 import bcrypt from "bcryptjs";
 import generateOtp from "../utils/generateOtp.js";
+import fs from "fs";
+import path from "path";
+import Appointment from "../models/Appointment.js";
 
 export const registerUser = async (req, res) => {
   const {
@@ -58,6 +61,7 @@ export const registerUser = async (req, res) => {
             timings,
             consultationFee,
             documents,
+            gender,
           }
         : {};
 
@@ -80,6 +84,7 @@ export const registerUser = async (req, res) => {
         userEmail,
         phone,
         password: hashedPassword,
+
         otp,
         isVerified: false,
         role: role || "user",
@@ -246,5 +251,227 @@ export const updateUser = async (req, res) => {
   } catch (error) {
     console.error("Error updating user:", error);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const updateDoc = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const {
+      name,
+      userEmail,
+      phone,
+      role,
+      education,
+      experience,
+      college,
+      specialization,
+      licenseNumber,
+      clinicAddress,
+      availableDays,
+      timings,
+      consultationFee,
+      gender,
+    } = req.body;
+
+    const profilePicture = req.files?.profilePicture
+      ? req.files.profilePicture[0].path.replace(/\\/g, "/")
+      : "";
+
+    const documents =
+      req.files?.documents?.map((file) => file.path.replace(/\\/g, "/")) || [];
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Basic fields
+    user.name = name || user.name;
+    user.userEmail = userEmail || user.userEmail;
+    user.phone = phone || user.phone;
+    user.role = role || user.role;
+    user.profilePicture = profilePicture || user.profilePicture;
+
+    // Doctor-specific fields (if role is doctor)
+    if (user.role === "doctor") {
+      user.education = education || user.education;
+      user.experience = experience || user.experience;
+      user.college = college || user.college;
+      user.specialization = specialization || user.specialization;
+      user.licenseNumber = licenseNumber || user.licenseNumber;
+      user.clinicAddress = clinicAddress || user.clinicAddress;
+      user.availableDays = availableDays || user.availableDays;
+      user.gender = gender || user.gender;
+      if (timings) {
+        user.timings =
+          typeof timings === "string" ? JSON.parse(timings) : timings;
+      }
+
+      user.consultationFee = consultationFee || user.consultationFee;
+
+      if (documents.length > 0) {
+        user.documents = Array.from(new Set([...user.documents, ...documents]));
+      }
+    }
+
+    await user.save();
+
+    res.status(200).json({ message: "Profile updated successfully", user });
+  } catch (error) {
+    console.error("Error updating user:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const deleteDocument = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { filePath } = req.body;
+
+    if (!filePath) {
+      return res.status(400).json({ message: "File path is required" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const updatedDocs = user.documents.filter((doc) => doc !== filePath);
+
+    if (updatedDocs.length === user.documents.length) {
+      return res
+        .status(404)
+        .json({ message: "Document not found in user's profile" });
+    }
+
+    user.documents = updatedDocs;
+    await user.save();
+
+    // Delete file from uploads folder
+    const fullPath = path.join(process.cwd(), filePath);
+    fs.unlink(fullPath, (err) => {
+      if (err) {
+        console.error("Error deleting file:", err);
+        // Still return success, as file might already be deleted
+      }
+    });
+
+    res.status(200).json({
+      message: "Document deleted successfully",
+      documents: user.documents,
+    });
+  } catch (error) {
+    console.error("Error deleting document:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getAllDoctors = async (req, res) => {
+  try {
+    const doctors = await User.find({ role: "doctor" });
+
+    if (!doctors || doctors.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No doctors found",
+      });
+    }
+
+    // Return the list of doctors
+    res.status(200).json({
+      success: true,
+      message: "Doctors fetched successfully",
+      doctors,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
+export const getDoctorDetails = async (req, res) => {
+  const { doctorId } = req.query;
+
+  try {
+    // Find the doctor by ID in the database
+    const doctor = await User.findById(doctorId);
+
+    if (!doctor || doctor.role !== "doctor") {
+      return res.status(404).json({
+        success: false,
+        message: "Doctor not found",
+      });
+    }
+
+    // Return the doctor's details
+    res.status(200).json({
+      success: true,
+      message: "Doctor details fetched successfully",
+      doctor,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
+export const createAppointment = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const {
+      doctorId,
+      patientName,
+      patientPhone,
+      appointmentDate,
+      appointmentTime,
+    } = req.body;
+
+    if (
+      !doctorId ||
+      !patientName ||
+      !patientPhone ||
+      !appointmentDate ||
+      !appointmentTime
+    ) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
+    const user = await User.findById(userId);
+
+    if (user.role !== "user") {
+      return res
+        .status(403)
+        .json({ message: "Only users can book appointments." });
+    }
+    if (userId === doctorId) {
+      return res
+        .status(403)
+        .json({ message: "Doctors cannot book appointments with themselves." });
+    }
+
+    const appointment = new Appointment({
+      userId,
+      doctorId,
+      patientName,
+      patientPhone,
+      appointmentDate,
+      appointmentTime,
+    });
+
+    await appointment.save();
+    res
+      .status(201)
+      .json({ message: "Appointment created successfully.", appointment });
+  } catch (error) {
+    console.error("Error creating appointment:", error);
+    res.status(500).json({ message: "Internal Server Error" });
   }
 };
