@@ -166,8 +166,6 @@ export const resendOtp = async (req, res) => {
 
 export const loginUser = async (req, res, next) => {
   const { identifier, password } = req.body;
-  console.log();
-
   try {
     const user = await User.findOne({
       $or: [{ phone: identifier }, { userEmail: identifier }],
@@ -371,7 +369,13 @@ export const deleteDocument = async (req, res) => {
 
 export const getAllDoctors = async (req, res) => {
   try {
-    const doctors = await User.find({ role: "doctor" });
+    const userId = req.user.id;
+    console.log(userId);
+    
+
+    const user = await User.findById(userId).select("wishlist");
+
+    const doctors = await User.find({ role: "doctor" }).lean(); // lean() for plain JS objects
 
     if (!doctors || doctors.length === 0) {
       return res.status(404).json({
@@ -380,11 +384,16 @@ export const getAllDoctors = async (req, res) => {
       });
     }
 
-    // Return the list of doctors
+    // Add `isWishlisted` to each doctor
+    const doctorsWithWishlistStatus = doctors.map((doctor) => ({
+      ...doctor,
+      isWishlisted: user.wishlist.includes(doctor._id.toString()),
+    }));
+
     res.status(200).json({
       success: true,
       message: "Doctors fetched successfully",
-      doctors,
+      doctors: doctorsWithWishlistStatus,
     });
   } catch (error) {
     console.error(error);
@@ -475,3 +484,108 @@ export const createAppointment = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+export const getAppointmentsByUserId = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    const appointments = await Appointment.find({ userId });
+
+    res.status(200).json({ appointments });
+  } catch (error) {
+    console.error("Error fetching appointments:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export const getAppointmentsByDoctorId = async (req, res) => {
+  try {
+    const doctorId = req.user.id;
+
+    const doctor = await User.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ message: "Doctor not found." });
+    }
+
+    if (doctor.role !== "doctor") {
+      return res.status(403).json({ message: "Access denied. Only doctors can view this." });
+    }
+
+    const appointments = await Appointment.find({ doctorId }).populate('userId', 'name email');
+
+    res.status(200).json({ appointments });
+  } catch (error) {
+    console.error("Error fetching doctor's appointments:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export const addToWishlist = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { doctorId } = req.body;
+
+    if (!doctorId) {
+      return res.status(400).json({ message: "Doctor ID is required." });
+    }
+
+    if (userId === doctorId) {
+      return res.status(400).json({ message: "You cannot add yourself to wishlist." });
+    }
+
+    const user = await User.findById(userId);
+    const doctor = await User.findById(doctorId);
+
+    if (!doctor || doctor.role !== "doctor") {
+      return res.status(404).json({ message: "Doctor not found." });
+    }
+
+    if (user.wishlist.includes(doctorId)) {
+      return res.status(400).json({ message: "Doctor is already in wishlist." });
+    }
+
+    user.wishlist.push(doctorId);
+    await user.save();
+
+    res.status(200).json({ message: "Doctor added to wishlist.", wishlist: user.wishlist });
+  } catch (error) {
+    console.error("Error adding to wishlist:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+
+export const removeFromWishlist = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { doctorId } = req.body;
+
+    if (!doctorId) {
+      return res.status(400).json({ message: "Doctor ID is required." });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user.wishlist.includes(doctorId)) {
+      return res.status(404).json({ message: "Doctor not found in wishlist." });
+    }
+
+    user.wishlist = user.wishlist.filter(
+      (id) => id.toString() !== doctorId.toString()
+    );
+
+    await user.save();
+
+    res.status(200).json({ message: "Doctor removed from wishlist.", wishlist: user.wishlist });
+  } catch (error) {
+    console.error("Error removing from wishlist:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+

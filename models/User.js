@@ -55,6 +55,7 @@ const userSchema = new mongoose.Schema(
     },
     consultationFee: Number,
     documents: [String],
+    wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
   },
   { timestamps: true }
 );
