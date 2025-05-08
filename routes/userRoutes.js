@@ -15,6 +15,9 @@ import {
   getAppointmentsByDoctorId,
   addToWishlist,
   removeFromWishlist,
+  addDoctorReview,
+  getDoctorReviews,
+  getFilteredDoctors,
 } from "../controllers/userController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import optionalMiddleware from "../middleware/optionalMiddleware.js";
@@ -43,5 +46,12 @@ router.get(
 router.post("/addToWishlist", authMiddleware, addToWishlist);
 
 router.post("/removeFromWishlist", authMiddleware, removeFromWishlist);
+
+router.post("/addDoctorReview", authMiddleware, addDoctorReview);
+
+router.get("/getDoctorReviews", authMiddleware, getDoctorReviews);
+
+router.get("/getFilteredDoctors", optionalMiddleware, getFilteredDoctors);
+
 
 export default router;

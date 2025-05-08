@@ -5,6 +5,7 @@ import generateOtp from "../utils/generateOtp.js";
 import fs from "fs";
 import path from "path";
 import Appointment from "../models/Appointment.js";
+import DocReview from "../models/DocReview.js";
 
 export const registerUser = async (req, res) => {
   const {
@@ -369,13 +370,18 @@ export const deleteDocument = async (req, res) => {
 
 export const getAllDoctors = async (req, res) => {
   try {
-    const userId = req.user.id;
-    console.log(userId);
-    
+    const userId = req?.user?.id;
+    let wishlist = [];
 
-    const user = await User.findById(userId).select("wishlist");
+    // If user is logged in, try to get their wishlist
+    if (userId) {
+      const user = await User.findById(userId).select("wishlist");
+      if (user) {
+        wishlist = user.wishlist.map((id) => id.toString());
+      }
+    }
 
-    const doctors = await User.find({ role: "doctor" }).lean(); // lean() for plain JS objects
+    const doctors = await User.find({ role: "doctor" }).lean();
 
     if (!doctors || doctors.length === 0) {
       return res.status(404).json({
@@ -384,10 +390,9 @@ export const getAllDoctors = async (req, res) => {
       });
     }
 
-    // Add `isWishlisted` to each doctor
     const doctorsWithWishlistStatus = doctors.map((doctor) => ({
       ...doctor,
-      isWishlisted: user.wishlist.includes(doctor._id.toString()),
+      isWishlisted: wishlist.includes(doctor._id.toString()),
     }));
 
     res.status(200).json({
@@ -404,12 +409,94 @@ export const getAllDoctors = async (req, res) => {
   }
 };
 
+export const getFilteredDoctors = async (req, res) => {
+  try {
+    const {
+      gender,
+      specialization,
+      minExperience,
+      maxFee,
+      day,
+      location,
+      minRating,
+    } = req.query;
+
+    
+    const userId = req?.user?.id;
+    let wishlist = [];
+
+    if (userId) {
+      const user = await User.findById(userId).select("wishlist");
+      if (user) {
+        wishlist = user.wishlist.map((id) => id.toString());
+      }
+    }
+
+    let query = { role: "doctor" };
+
+    if (gender) query.gender = gender;
+    if (specialization) query.specialization = specialization;
+    if (minExperience) query.experience = { $gte: parseInt(minExperience) };
+    if (maxFee) query.consultationFee = { $lte: parseInt(maxFee) };
+    if (day) query.availableDays = day;
+    if (location)
+      query.clinicAddress = { $regex: location, $options: "i" };
+
+    // Fetch doctors
+    const doctors = await User.find(query).lean();
+
+    // Optionally filter by minRating
+    const doctorIds = doctors.map((d) => d._id);
+    const reviews = await DocReview.aggregate([
+      { $match: { doctor: { $in: doctorIds } } },
+      {
+        $group: {
+          _id: "$doctor",
+          avgRating: { $avg: "$rating" },
+          totalReviews: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const ratingMap = {};
+    reviews.forEach((r) => {
+      ratingMap[r._id.toString()] = {
+        averageRating: parseFloat(r.avgRating.toFixed(1)),
+        totalReviews: r.totalReviews,
+      };
+    });
+
+    const filteredDoctors = doctors
+      .filter((doc) => {
+        const stats = ratingMap[doc._id.toString()] || { averageRating: 0 };
+        return !minRating || stats.averageRating >= parseFloat(minRating);
+      })
+      .map((doc) => {
+        const stats = ratingMap[doc._id.toString()] || {};
+        return {
+          ...doc,
+          ...stats,
+          isWishlisted: wishlist.includes(doc._id.toString()),
+        };
+      });
+
+    res.status(200).json({
+      success: true,
+      message: "Filtered doctors fetched successfully",
+      doctors: filteredDoctors,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 export const getDoctorDetails = async (req, res) => {
   const { doctorId } = req.query;
 
   try {
     // Find the doctor by ID in the database
-    const doctor = await User.findById(doctorId);
+    const doctor = await User.findById(doctorId).lean();
 
     if (!doctor || doctor.role !== "doctor") {
       return res.status(404).json({
@@ -418,11 +505,27 @@ export const getDoctorDetails = async (req, res) => {
       });
     }
 
+    // 2. Get reviews for the doctor
+    const reviews = await DocReview.find({ doctor: doctorId })
+      .populate("user", "name profilePicture")
+      .sort({ createdAt: -1 });
+
+    const totalReviews = reviews.length;
+    const averageRating =
+      totalReviews > 0
+        ? (
+            reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
+          ).toFixed(1)
+        : 0;
+
     // Return the doctor's details
     res.status(200).json({
       success: true,
       message: "Doctor details fetched successfully",
       doctor,
+      reviews,
+      totalReviews,
+      averageRating,
     });
   } catch (error) {
     console.error(error);
@@ -513,10 +616,15 @@ export const getAppointmentsByDoctorId = async (req, res) => {
     }
 
     if (doctor.role !== "doctor") {
-      return res.status(403).json({ message: "Access denied. Only doctors can view this." });
+      return res
+        .status(403)
+        .json({ message: "Access denied. Only doctors can view this." });
     }
 
-    const appointments = await Appointment.find({ doctorId }).populate('userId', 'name email');
+    const appointments = await Appointment.find({ doctorId }).populate(
+      "userId",
+      "name email"
+    );
 
     res.status(200).json({ appointments });
   } catch (error) {
@@ -535,7 +643,9 @@ export const addToWishlist = async (req, res) => {
     }
 
     if (userId === doctorId) {
-      return res.status(400).json({ message: "You cannot add yourself to wishlist." });
+      return res
+        .status(400)
+        .json({ message: "You cannot add yourself to wishlist." });
     }
 
     const user = await User.findById(userId);
@@ -546,19 +656,22 @@ export const addToWishlist = async (req, res) => {
     }
 
     if (user.wishlist.includes(doctorId)) {
-      return res.status(400).json({ message: "Doctor is already in wishlist." });
+      return res
+        .status(400)
+        .json({ message: "Doctor is already in wishlist." });
     }
 
     user.wishlist.push(doctorId);
     await user.save();
 
-    res.status(200).json({ message: "Doctor added to wishlist.", wishlist: user.wishlist });
+    res
+      .status(200)
+      .json({ message: "Doctor added to wishlist.", wishlist: user.wishlist });
   } catch (error) {
     console.error("Error adding to wishlist:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
-
 
 export const removeFromWishlist = async (req, res) => {
   try {
@@ -581,11 +694,68 @@ export const removeFromWishlist = async (req, res) => {
 
     await user.save();
 
-    res.status(200).json({ message: "Doctor removed from wishlist.", wishlist: user.wishlist });
+    res.status(200).json({
+      message: "Doctor removed from wishlist.",
+      wishlist: user.wishlist,
+    });
   } catch (error) {
     console.error("Error removing from wishlist:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
 
+export const addDoctorReview = async (req, res) => {
+  const { rating, review, doctorId } = req.body;
+  const userId = req.user?.id;
 
+  try {
+    const doctor = await User.findOne({ _id: doctorId, role: "doctor" });
+    if (!doctor) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Doctor not found" });
+    }
+
+    const alreadyReviewed = await DocReview.findOne({
+      doctor: doctorId,
+      user: userId,
+    });
+    if (alreadyReviewed) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Already reviewed this doctor" });
+    }
+
+    const newReview = await DocReview.create({
+      doctor: doctorId,
+      user: userId,
+      rating,
+      review,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Review added successfully",
+      review: newReview,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+export const getDoctorReviews = async (req, res) => {
+  const { doctorId } = req.query;
+
+  try {
+    const reviews = await DocReview.find({ doctor: doctorId }).populate(
+      "user",
+      "name profilePicture"
+    );
+
+    res.status(200).json({ success: true, reviews });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
