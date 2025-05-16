@@ -33,5 +33,7 @@ export const uploadFields = multer({
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
 }).fields([
   { name: "profilePicture", maxCount: 1 },
+  { name: "storeImages", maxCount: 10 },
   { name: "documents", maxCount: 10 },
+  { name: "productImages", maxCount: 10 }
 ]);

@@ -705,6 +705,8 @@ export const removeFromWishlist = async (req, res) => {
 };
 
 export const addDoctorReview = async (req, res) => {
+  console.log(req.body);
+  
   const { rating, review, doctorId } = req.body;
   const userId = req.user?.id;
 

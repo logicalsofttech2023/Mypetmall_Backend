@@ -33,6 +33,9 @@ router.get("/getUserById", authMiddleware, getUserById);
 router.post("/updateUser", uploadFields, authMiddleware, updateUser);
 router.post("/updateDoc", uploadFields, authMiddleware, updateDoc);
 router.delete("/deleteDocument", uploadFields, authMiddleware, deleteDocument);
+
+
+
 router.get("/getAllDoctors", optionalMiddleware, getAllDoctors);
 router.get("/getDoctorDetails", getDoctorDetails);
 router.post("/createAppointment", authMiddleware, createAppointment);
